@@ -68,6 +68,10 @@ abstract class ContainersTestBase {
         registry.add("spring.artemis.broker-url", artemis::getBrokerUrl);
         registry.add("spring.artemis.user", artemis::getUser);
         registry.add("spring.artemis.password", artemis::getPassword);
+    }
+
+    @DynamicPropertySource
+    static void keepTheAtomikosLogInTarget(DynamicPropertyRegistry registry) {
         registry.add("atomikos.properties.log-base-dir", () -> "target/transaction-logs");
     }
 

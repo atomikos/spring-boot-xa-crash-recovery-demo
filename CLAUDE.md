@@ -37,6 +37,11 @@ Things that will surprise you:
 - Order ids can jump (1, 2, 102, ...): Hibernate allocates ids in blocks, and
   a crash or restart skips the rest of the block.
 - `./mvnw test` runs the crash tests with Testcontainers (Docker needed, ~1-2 min).
+- `./benchmark.sh` compares throughput and latency of `naive`, `local-tx` and
+  `xa` (`OrderServiceBenchmark`, skipped by `./mvnw test`). It uses its own
+  Testcontainers, not `compose.yaml`, so it leaves the demo data alone, but takes
+  ~20 min (`ROUNDS=1` for a quick look). Numbers depend heavily on fsync
+  speed: always say which machine and disk they came from.
 
 ## Recording the video
 
