@@ -39,6 +39,13 @@ On Windows, use `demo.bat` instead of `demo.sh` (same commands: `.\demo order bo
 of `./mvnw`. To pick a profile, run `.\mvnw spring-boot:run "-Dspring-boot.run.profiles=naive"`
 instead of putting `SPRING_PROFILES_ACTIVE=...` in front of the command.
 
+Or open **http://localhost:8080/** (handy for a live talk): buttons to place an
+order or crash it at each point, and the same tables as `status`, refreshed
+every second. When the app is down the page says so, and it picks up again as
+soon as you restart it, so you can watch recovery happen. The one thing it
+can't show is an in-doubt transaction while the app is down (act 3): the page
+reads through the app, so use `./demo.sh status` for that moment.
+
 Each order is a row in PostgreSQL plus a message on the `orders` queue; the
 `ShippingListener` turns the message into a shipment. Every order should be
 shipped exactly once.

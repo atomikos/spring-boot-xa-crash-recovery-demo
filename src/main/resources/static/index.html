@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>XA crash demo</title>
+<!-- The same as demo.sh, in a browser: buttons for "order" and "crash", and a live "status". -->
+<style>
+  body { font: 20px/1.4 system-ui, sans-serif; margin: 2rem auto; max-width: 60rem; padding: 0 1rem; color: #1a1a1a; background: #fff; }
+  h1 { font-size: 1.6rem; margin: 0 0 .25rem; }
+  #mode { color: #555; margin: 0 0 1.5rem; }
+  .actions { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; }
+  button, input { font: inherit; padding: .5rem 1rem; border-radius: .4rem; border: 1px solid #888; }
+  input { width: 8rem; }
+  button { background: #f4f4f4; cursor: pointer; }
+  button:hover { background: #e6e6e6; }
+  button.order { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+  button.crash { background: #fff1f0; border-color: #d1242f; }
+  #result { min-height: 1.5em; margin: 1rem 0 2rem; font-weight: 600; }
+  #down { display: none; padding: 1rem; border-radius: .4rem; background: #1a1a1a; color: #fff; margin-bottom: 1rem; }
+  body.down #down { display: block; }
+  body.down #status { display: none; }
+  table { border-collapse: collapse; width: 100%; margin-bottom: 2rem; }
+  th, td { text-align: left; padding: .4rem .75rem; border-bottom: 1px solid #ddd; }
+  th { font-size: .85rem; text-transform: uppercase; color: #555; }
+  td.empty { color: #888; font-style: italic; }
+  #in-doubt td { background: #fff8c5; }
+</style>
+</head>
+<body>
+<h1>Crash a Spring Boot app mid-transaction</h1>
+<p id="mode">&nbsp;</p>
+
+<div class="actions">
+  <input id="product" value="book" aria-label="product">
+  <button class="order" onclick="order()">Place an order</button>
+  <button class="crash" onclick="order('before-send')">💣 Crash before the send</button>
+  <button class="crash" onclick="order('before-commit')">💣 Crash before the commit</button>
+  <button class="crash" onclick="order('after-prepare')">💣 Crash after prepare</button>
+</div>
+<p id="result"></p>
+
+<div id="down">💀 The app is down. Restart it (<code>./mvnw spring-boot:run</code>);
+  meanwhile <code>./demo.sh status</code> still reads PostgreSQL.</div>
+<div id="status">
+  <table>
+    <thead><tr><th>Order</th><th>Product</th><th>Shipment</th></tr></thead>
+    <tbody id="orders"></tbody>
+  </table>
+  <table>
+    <thead><tr><th>In-doubt (prepared) transactions</th><th>Prepared</th></tr></thead>
+    <tbody id="in-doubt"></tbody>
+  </table>
+</div>
+
+<script>
+  const $ = id => document.getElementById(id);
+
+  async function order(crash) {
+    const params = new URLSearchParams({ product: $('product').value || 'book' });
+    if (crash) params.set('crash', crash);
+    $('result').textContent = crash ? '💣 placing an order that crashes ' + crash + '…' : 'placing an order…';
+    try {
+      const response = await fetch('/orders?' + params, { method: 'POST' });
+      $('result').textContent = response.ok ? await response.text() : 'error: HTTP ' + response.status;
+    } catch (e) {
+      $('result').textContent = crash ? '💥 no answer: the app crashed' : '💥 no answer - did the app just crash?';
+    }
+    refresh();
+  }
+
+  function rows(tbody, items, cells, empty) {
+    tbody.replaceChildren(...(items.length ? items.map(item => {
+      const tr = document.createElement('tr');
+      for (const value of cells(item)) {
+        const td = document.createElement('td');
+        td.textContent = value ?? '';
+        tr.append(td);
+      }
+      return tr;
+    }) : [Object.assign(document.createElement('tr'), { innerHTML: `<td class="empty" colspan="3">${empty}</td>` })]));
+  }
+
+  async function refresh() {
+    try {
+      const response = await fetch('/status', { signal: AbortSignal.timeout(2000) });
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      const status = await response.json();
+      if (document.body.classList.contains('down')) $('result').textContent = 'the app is back up';
+      document.body.classList.remove('down');
+      $('mode').textContent = 'Running: ' + status.mode;
+      rows($('orders'), status.orders, o => [o.order, o.product, o.shipment], 'no orders yet');
+      rows($('in-doubt'), status.inDoubt, t => [t.gid, new Date(t.prepared).toLocaleTimeString()], 'none');
+    } catch (e) {
+      document.body.classList.add('down');
+      $('mode').textContent = ' ';
+    }
+  }
+
+  (function poll() { refresh().finally(() => setTimeout(poll, 1000)); })();
+</script>
+</body>
+</html>
