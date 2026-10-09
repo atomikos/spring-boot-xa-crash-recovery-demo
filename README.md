@@ -249,6 +249,55 @@ kill the test runner too:
   is the negative control: it proves the Atomikos test would catch a missing
   XA transaction.
 
+## What does XA cost?
+
+Both-or-neither isn't free: a two-phase commit adds a prepare step to each
+resource, and a transaction log that must reach the disk before anything is
+committed. To see how much that is, compare the three modes:
+
+```bash
+./benchmark.sh            # ~20 min: 3 rounds of naive, local-tx and xa
+ROUNDS=1 ./benchmark.sh   # a quicker look
+```
+
+Each mode runs in its own JVM against fresh containers (your demo data is not
+touched) and places orders as fast as it can from 1, 4 and 16 threads.
+Every mode gets the same pool sizes, and the shipping listener is paused, so
+only placing an order is measured. Each run then checks that every order has
+its row and its message, and that no in-doubt transaction is left. A fast
+but wrong number doesn't count. Raw results go to `target/benchmark/results.csv`.
+
+One machine's results (Windows + WSL2, Docker inside WSL, ext4, about
+1.1 ms per synced write; average of 3 rounds):
+
+| threads | naive | `@Transactional` (local-tx) | Atomikos XA |
+|--------:|------:|------:|------:|
+| 1  | 301 orders/s, p50 3.2 ms | 300 orders/s, p50 3.2 ms | 65 orders/s, p50 14.7 ms |
+| 4  | 884 orders/s, p50 4.4 ms | 877 orders/s, p50 4.4 ms | 152 orders/s, p50 24.6 ms |
+| 16 | 1852 orders/s, p50 8.3 ms | 1834 orders/s, p50 8.4 ms | 189 orders/s, p50 73.4 ms |
+
+How to read it:
+
+- **A local `@Transactional` costs nothing**, so the whole difference is XA.
+- **One thread shows the price of two-phase commit: about +11.5 ms per order** here.
+  That comes from the extra prepare round trips and from the synced disk
+  writes in PostgreSQL, Artemis and the Atomikos log. It is mostly
+  disk-sync time, so it depends heavily on the disk: run the benchmark on
+  your own hardware before quoting a number.
+- **Under concurrency, throughput levels off near 190 orders/s** with
+  TransactionsEssentials 6.0.1. Thread dumps show why: log writes take turns
+  behind one lock, each forcing the disk on its own. With the log switched off
+  (for diagnosis only: that breaks recovery) the next queue is the JMS
+  connection pool, at about 240 orders/s.
+
+Throughput is only half of the comparison: the naive and local-tx numbers
+are for code that loses or invents orders when it crashes (acts 1 and 2).
+
+Options for a single run:
+`./mvnw test -Dtest=OrderServiceBenchmark -Dbenchmark.mode=naive|local-tx|xa`,
+plus `-Dbenchmark.threads=1,4,16`, `-Dbenchmark.warmup=10` and
+`-Dbenchmark.seconds=20` (seconds). `./benchmark.sh` passes any option on to Maven.
+
 ## Going to production?
 
 The crash recovery you saw is in the open-source edition. Running it in
