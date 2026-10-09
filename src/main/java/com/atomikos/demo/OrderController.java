@@ -15,16 +15,14 @@ public class OrderController {
     private static final Logger LOGGER = LoggerFactory.getLogger(OrderController.class);
 
     private final OrderService orderService;
-    private final CrashSwitch crashSwitch;
 
-    public OrderController(OrderService orderService, CrashSwitch crashSwitch) {
+    public OrderController(OrderService orderService) {
         this.orderService = orderService;
-        this.crashSwitch = crashSwitch;
     }
 
     @PostMapping("/orders")
     public String placeOrder(@RequestParam(defaultValue = "book") String product) {
-        long id = crashSwitch.whilePlacingAnOrder(() -> orderService.placeOrder(product));
+        long id = orderService.placeOrder(product);
         LOGGER.info("🛒 placed order #{} ({})", id, product);
         return "placed order #" + id + "\n";
     }

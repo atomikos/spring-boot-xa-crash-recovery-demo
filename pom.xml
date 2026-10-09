@@ -40,7 +40,6 @@
 		<dependency>
 			<groupId>org.postgresql</groupId>
 			<artifactId>postgresql</artifactId>
-			<scope>runtime</scope>
 		</dependency>
 		<!-- starts compose.yaml (PostgreSQL + Artemis) on ./mvnw spring-boot:run -->
 		<dependency>

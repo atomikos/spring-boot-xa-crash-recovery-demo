@@ -9,6 +9,10 @@ case "${1:-}" in
   order)
     curl -s -X POST "localhost:8080/orders?product=${2:-book}" || { echo "(no answer - did the app just crash?)"; exit 1; }
     ;;
+  crash)
+    curl -s -X POST "localhost:8080/orders?product=book&crash=${2:?usage: $0 crash before-send|before-commit|after-prepare}" \
+      || echo "(no answer: the app crashed)"
+    ;;
   status)
     psql -c "SELECT coalesce(o.id, s.order_id) AS \"order\", o.product,
                     CASE WHEN o.id IS NULL THEN '👻 shipped, but the order does not exist'
@@ -22,7 +26,7 @@ case "${1:-}" in
     rm -rf transaction-logs
     ;;
   *)
-    echo "usage: $0 order [product] | status | reset"
+    echo "usage: $0 order [product] | crash before-send|before-commit|after-prepare | status | reset"
     exit 1
     ;;
 esac

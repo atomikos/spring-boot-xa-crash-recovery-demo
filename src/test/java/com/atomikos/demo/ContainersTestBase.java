@@ -74,11 +74,11 @@ abstract class ContainersTestBase {
     }
 
     void placeOrderAndCrash(CrashSwitch.CrashPoint point) {
-        crashSwitch.armForTest(point, () -> {
+        crashSwitch.crashWith(() -> {
             throw new IllegalStateException("simulated crash");
         });
         // only the simulated crash may stop the order: any other failure fails the test
-        assertThatThrownBy(() -> crashSwitch.whilePlacingAnOrder(() -> orderService.placeOrder("book")))
+        assertThatThrownBy(() -> crashSwitch.placeOrderAndCrash(point, () -> orderService.placeOrder("book")))
                 .hasMessage("simulated crash");
     }
 

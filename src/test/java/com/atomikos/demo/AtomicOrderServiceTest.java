@@ -64,7 +64,7 @@ class AtomicOrderServiceTest extends ContainersTestBase {
         AtomicBoolean crashed = new AtomicBoolean();
         AtomicLong inDoubtAtCrash = new AtomicLong(-1);
         AtomicLong ordersAtCrash = new AtomicLong(-1);
-        crashSwitch.armForTest(AFTER_PREPARE, () -> {
+        crashSwitch.crashWith(() -> {
             if (crashed.compareAndSet(false, true)) { // a real crash happens once
                 inDoubtAtCrash.set(countInPostgres("SELECT count(*) FROM pg_prepared_xacts"));
                 ordersAtCrash.set(countInPostgres("SELECT count(*) FROM purchase_order"));
@@ -72,7 +72,7 @@ class AtomicOrderServiceTest extends ContainersTestBase {
             }
         });
 
-        long id = crashSwitch.whilePlacingAnOrder(() -> orderService.placeOrder("book"));
+        long id = crashSwitch.placeOrderAndCrash(AFTER_PREPARE, () -> orderService.placeOrder("book"));
 
         assertThat(crashed).as("the crash switch fired in phase 2").isTrue();
         assertThat(inDoubtAtCrash).as("prepared transactions at the crash").hasValue(1);

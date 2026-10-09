@@ -5,8 +5,6 @@ package com.atomikos.demo;
  */
 public interface OrderService {
 
-    String ORDERS_QUEUE = "orders";
-
     long placeOrder(String product);
 
 }

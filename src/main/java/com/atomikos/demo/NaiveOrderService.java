@@ -25,9 +25,9 @@ public class NaiveOrderService implements OrderService {
     @Override
     public long placeOrder(String product) {
         PurchaseOrder order = orders.save(new PurchaseOrder(product)); // 1. PostgreSQL
-        crashSwitch.beforeSend();                                      //    (CRASH_BEFORE_SEND=true)
-        jms.convertAndSend(ORDERS_QUEUE, order.getId());               // 2. Artemis
-        crashSwitch.beforeCommit();                                    //    (CRASH_BEFORE_COMMIT=true)
+        crashSwitch.beforeSend();                                      //    ./demo.sh crash before-send
+        jms.convertAndSend("orders", order.getId());                   // 2. Artemis
+        crashSwitch.beforeCommit();                                    //    ./demo.sh crash before-commit
         return order.getId();
     }
 

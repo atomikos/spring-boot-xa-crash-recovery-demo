@@ -19,7 +19,7 @@ public class ShippingListener {
         this.shipments = shipments;
     }
 
-    @JmsListener(destination = OrderService.ORDERS_QUEUE)
+    @JmsListener(destination = "orders")
     public void onOrderPlaced(Long orderId) {
         shipments.save(new Shipment(orderId));
         LOGGER.info("📦 shipped order #{}", orderId);
