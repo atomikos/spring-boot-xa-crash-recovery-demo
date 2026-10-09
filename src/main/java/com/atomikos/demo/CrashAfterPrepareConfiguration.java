@@ -1,25 +1,42 @@
+/*
+ * Copyright 2026 Atomikos
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.atomikos.demo;
 
-import java.lang.reflect.InvocationHandler;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
-import java.lang.reflect.Proxy;
+import java.sql.SQLException;
 
+import javax.sql.XAConnection;
 import javax.sql.XADataSource;
-import javax.transaction.xa.XAResource;
+import javax.transaction.xa.XAException;
+import javax.transaction.xa.Xid;
 
+import org.postgresql.core.BaseConnection;
+import org.postgresql.xa.PGXAConnection;
+import org.postgresql.xa.PGXADataSource;
 import org.springframework.boot.jdbc.XADataSourceWrapper;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
-import org.springframework.util.ClassUtils;
 
 import com.atomikos.spring.AtomikosXADataSourceWrapper;
 
 /**
- * Demo plumbing for {@code CRASH_AFTER_PREPARE}: hands Atomikos the PostgreSQL
- * {@link XADataSource} as usual, but with its {@link XAResource} wrapped so
- * {@link CrashSwitch} gets a call right before the phase-2 commit.
+ * Demo plumbing for {@code ./demo.sh crash after-prepare}: hands Atomikos the
+ * PostgreSQL {@link XADataSource} as usual, but its connections call
+ * {@link CrashSwitch} right before the phase-2 commit.
  * Not something a real application needs.
  */
 @Configuration(proxyBeanMethods = false)
@@ -29,48 +46,35 @@ class CrashAfterPrepareConfiguration {
     @Bean
     XADataSourceWrapper xaDataSourceWrapper(CrashSwitch crashSwitch) {
         AtomikosXADataSourceWrapper atomikos = new AtomikosXADataSourceWrapper();
-        return dataSource -> atomikos.wrapDataSource((XADataSource) intercept(dataSource, crashSwitch));
+        return postgres -> atomikos.wrapDataSource(new CrashingXADataSource((PGXADataSource) postgres, crashSwitch));
     }
 
-    // a proxy with all the target's interfaces: PostgreSQL's XAConnection is also its XAResource
-    private static Object intercept(Object target, CrashSwitch crashSwitch) {
-        Class<?>[] interfaces = ClassUtils.getAllInterfacesForClass(target.getClass());
-        return Proxy.newProxyInstance(target.getClass().getClassLoader(), interfaces, new Interceptor(target, crashSwitch));
-    }
+    private static class CrashingXADataSource extends PGXADataSource {
 
-    private record Interceptor(Object target, CrashSwitch crashSwitch) implements InvocationHandler {
+        private final transient CrashSwitch crashSwitch;
 
-        @Override
-        public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
-            if (method.getDeclaringClass() == XAResource.class && method.getName().equals("commit")
-                    && Boolean.FALSE.equals(args[1])) {
-                crashSwitch.beforePhase2Commit(); // two-phase commit, after a successful prepare
-            }
-            Object result;
-            try {
-                result = method.invoke(target, unwrap(args));
-            } catch (InvocationTargetException e) {
-                throw e.getCause();
-            }
-            if (method.getName().equals("getXAConnection") || method.getName().equals("getXAResource")) {
-                return intercept(result, crashSwitch);
-            }
-            return result;
+        // the same database and settings as the one Spring Boot configured
+        CrashingXADataSource(PGXADataSource postgres, CrashSwitch crashSwitch) {
+            setURL(postgres.getURL());
+            setUser(postgres.getUser());
+            setPassword(postgres.getPassword());
+            this.crashSwitch = crashSwitch;
         }
 
-        // the driver must see its own objects, e.g. in isSameRM(..) and equals(..)
-        private static Object[] unwrap(Object[] args) {
-            if (args == null) {
-                return null;
-            }
-            Object[] unwrapped = args.clone();
-            for (int i = 0; i < unwrapped.length; i++) {
-                if (unwrapped[i] != null && Proxy.isProxyClass(unwrapped[i].getClass())
-                        && Proxy.getInvocationHandler(unwrapped[i]) instanceof Interceptor interceptor) {
-                    unwrapped[i] = interceptor.target();
+        @Override
+        public XAConnection getXAConnection(String user, String password) throws SQLException {
+            BaseConnection connection = (BaseConnection) getConnection(user, password);
+            return new PGXAConnection(connection) {
+
+                @Override
+                public void commit(Xid xid, boolean onePhase) throws XAException {
+                    if (!onePhase) {
+                        crashSwitch.beforePhase2Commit(); // two-phase commit, after a successful prepare
+                    }
+                    super.commit(xid, onePhase);
                 }
-            }
-            return unwrapped;
+
+            };
         }
 
     }

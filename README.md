@@ -11,7 +11,8 @@ three times:
 | 3 | Atomikos + one `@Transactional` | in the middle of the commit, after both resources *prepared* | in-doubt: visible in `pg_prepared_xacts` | **Atomikos recovery completes it** — consistent |
 
 The crashes are not a random `kill -9` (which almost always misses the window):
-an environment variable halts the JVM at the exact point, every time.
+a crash switch halts the JVM at the exact point, every time:
+`./demo.sh crash <point>` places one order that crashes there.
 
 Everything here is the free, open-source **Atomikos TransactionsEssentials**.
 
@@ -33,6 +34,18 @@ In a second terminal:
 ./demo.sh status        # orders, shipments and in-doubt transactions, straight from PostgreSQL
 ```
 
+On Windows, use `demo.bat` instead of `demo.sh` (same commands: `.\demo order book`,
+`.\demo crash before-send`, `.\demo status`, `.\demo reset`) and `.\mvnw` instead
+of `./mvnw`. To pick a profile, run `.\mvnw spring-boot:run "-Dspring-boot.run.profiles=naive"`
+instead of putting `SPRING_PROFILES_ACTIVE=...` in front of the command.
+
+Or open **http://localhost:8080/** (handy for a live talk): buttons to place an
+order or crash it at each point, and the same tables as `status`, refreshed
+every second. When the app is down the page says so, and it picks up again as
+soon as you restart it, so you can watch recovery happen. The one thing it
+can't show is an in-doubt transaction while the app is down (act 3): the page
+reads through the app, so use `./demo.sh status` for that moment.
+
 Each order is a row in PostgreSQL plus a message on the `orders` queue; the
 `ShippingListener` turns the message into a shipment. Every order should be
 shipped exactly once.
@@ -41,8 +54,8 @@ shipped exactly once.
 
 ```bash
 ./demo.sh reset                              # fresh database, fresh broker
-SPRING_PROFILES_ACTIVE=naive CRASH_BEFORE_SEND=true ./mvnw spring-boot:run
-./demo.sh order book
+SPRING_PROFILES_ACTIVE=naive ./mvnw spring-boot:run
+./demo.sh crash before-send
 ```
 
 ```
@@ -77,9 +90,9 @@ the exact same code plus `@Transactional`:
 @Transactional
 public long placeOrder(String product) {
     PurchaseOrder order = orders.save(new PurchaseOrder(product)); // 1. PostgreSQL
-    crashSwitch.beforeSend();                                      //    (CRASH_BEFORE_SEND=true)
-    jms.convertAndSend(ORDERS_QUEUE, order.getId());               // 2. Artemis
-    crashSwitch.beforeCommit();                                    //    (CRASH_BEFORE_COMMIT=true)
+    crashSwitch.beforeSend();                                      //    ./demo.sh crash before-send
+    jms.convertAndSend("orders", order.getId());                   // 2. Artemis
+    crashSwitch.beforeCommit();                                    //    ./demo.sh crash before-commit
     return order.getId();
 }
 ```
@@ -89,8 +102,8 @@ transaction across both. This time we crash *after* the send:
 
 ```bash
 ./demo.sh reset
-CRASH_BEFORE_COMMIT=true ./mvnw spring-boot:run
-./demo.sh order book
+./mvnw spring-boot:run
+./demo.sh crash before-commit
 ./demo.sh status                             # no order, no shipment
 ```
 
@@ -105,8 +118,8 @@ JMS send happens on its own. Try it with the `local-tx` profile:
 
 ```bash
 ./demo.sh reset
-SPRING_PROFILES_ACTIVE=local-tx CRASH_BEFORE_COMMIT=true ./mvnw spring-boot:run
-./demo.sh order book
+SPRING_PROFILES_ACTIVE=local-tx ./mvnw spring-boot:run
+./demo.sh crash before-commit
 SPRING_PROFILES_ACTIVE=local-tx ./mvnw spring-boot:run      # restart
 ./demo.sh status
 ```
@@ -130,8 +143,8 @@ its commit.
 
 ```bash
 ./demo.sh reset
-CRASH_AFTER_PREPARE=true ./mvnw spring-boot:run
-./demo.sh order book
+./mvnw spring-boot:run
+./demo.sh crash after-prepare
 ```
 
 ```
@@ -174,21 +187,19 @@ transactions.
 - **Try a real `kill -9`** while placing orders in a loop
   (`while ./demo.sh order; do :; done`). You'll rarely hit the window between
   prepare and commit — which is exactly why these bugs survive testing and show up in production.
-- **Restart with the switch still on** (`CRASH_AFTER_PREPARE=true`): recovery
-  does not crash again — the switch only fires while an order is being placed.
-  The next order crashes again, of course.
+- **Wonder why recovery doesn't crash too?** The crash switch arms only the
+  one request that asked for it (`?crash=after-prepare`), not the phase-2
+  commit that Atomikos recovery replays after the restart.
 - **Delete `transaction-logs/` before restarting in act 3.** Now nobody
   knows the decision was "commit": the order is never completed, and the
   prepared transaction sits in `pg_prepared_xacts`, holding its locks. The
   transaction log is what makes recovery possible — keep it on durable storage.
 - **Look at the crash switch**: [`CrashSwitch`](src/main/java/com/atomikos/demo/CrashSwitch.java)
   and [`CrashAfterPrepareConfiguration`](src/main/java/com/atomikos/demo/CrashAfterPrepareConfiguration.java),
-  which wraps the PostgreSQL `XAResource` to get a call right before the
-  phase-2 commit. Demo plumbing only — a real app needs none of it.
-
-On Windows (PowerShell), set the switches with `$env:CRASH_AFTER_PREPARE="true"`
-before `./mvnw spring-boot:run`, and use `curl.exe -X POST localhost:8080/orders`
-and `docker compose exec postgres psql -U shop -d shop` instead of `demo.sh`.
+  which subclasses the PostgreSQL `XAConnection` to get a call right before
+  the phase-2 commit. Demo plumbing only — a real app needs none of it.
+  (That hook needs Atomikos, so `crash after-prepare` does not crash under the
+  `naive` and `local-tx` profiles.)
 
 ## How it's wired
 
@@ -228,7 +239,9 @@ Docker). The crash switch throws instead of halting there, since a halt would
 kill the test runner too:
 
 - `AtomicOrderServiceTest`: an order is stored and shipped; a crash before
-  or after the send leaves neither an order nor a shipment.
+  or after the send leaves neither an order nor a shipment; a crash after the
+  prepare leaves an in-doubt transaction in `pg_prepared_xacts`, which Atomikos
+  then commits (without a JVM restart, unlike act 3).
 - `NaiveOrderServiceTest`: without a transaction, a crash before the send
   leaves an order that never ships.
 - `LocalTransactionOrderServiceTest`: with `@Transactional` but without

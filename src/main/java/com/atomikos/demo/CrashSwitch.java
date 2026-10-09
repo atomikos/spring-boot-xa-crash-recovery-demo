@@ -1,31 +1,46 @@
+/*
+ * Copyright 2026 Atomikos
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.atomikos.demo;
 
-import java.util.EnumSet;
-import java.util.Set;
+import java.io.IOException;
 import java.util.function.LongSupplier;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import org.springframework.web.filter.OncePerRequestFilter;
+
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 
 /**
- * Kills the JVM at an exact point, so a crash demo never misses its window
- * (a random {@code kill -9} almost always does):
- * <ul>
- * <li>{@code CRASH_BEFORE_SEND=true}: after the database insert, before the JMS send.</li>
- * <li>{@code CRASH_BEFORE_COMMIT=true}: after the JMS send, before the transaction commits.</li>
- * <li>{@code CRASH_AFTER_PREPARE=true}: during commit, after both resources voted
- * yes in phase 1 (prepare) and before PostgreSQL got the phase-2 commit -
- * leaving an in-doubt transaction for Atomikos to recover on restart.</li>
- * </ul>
- * They only fire while an order is being placed, so a restart with a switch
- * still on does not crash again while Atomikos recovers.
+ * Kills the JVM at an exact point while placing one order, so a crash demo
+ * never misses its window (a random {@code kill -9} almost always does).
+ * <p>
+ * {@code ./demo.sh crash before-send} sends {@code POST /orders?crash=before-send}:
+ * that one request crashes {@link CrashPoint#BEFORE_SEND before the send}, and
+ * so on. Other requests, and Atomikos recovering after a restart, never crash.
  */
 @Component
-public class CrashSwitch {
+public class CrashSwitch extends OncePerRequestFilter {
 
-    enum CrashPoint {
+    public enum CrashPoint {
         BEFORE_SEND("after orders.save(..), before the JMS send"),
         BEFORE_COMMIT("after the JMS send, before the commit"),
         AFTER_PREPARE("PostgreSQL and Artemis both PREPARED, commit decision logged, PostgreSQL NOT committed yet");
@@ -39,25 +54,23 @@ public class CrashSwitch {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(CrashSwitch.class);
 
-    private static final ThreadLocal<Boolean> PLACING_AN_ORDER = ThreadLocal.withInitial(() -> false);
-
-    private final Set<CrashPoint> armed = EnumSet.noneOf(CrashPoint.class);
+    // the crash point of the order being placed on this thread, if any
+    private static final ThreadLocal<CrashPoint> ARMED = new ThreadLocal<>();
 
     private Runnable crash = () -> Runtime.getRuntime().halt(1);
 
-    public CrashSwitch(@Value("${CRASH_BEFORE_SEND:false}") boolean beforeSend,
-            @Value("${CRASH_BEFORE_COMMIT:false}") boolean beforeCommit,
-            @Value("${CRASH_AFTER_PREPARE:false}") boolean afterPrepare) {
-        if (beforeSend) {
-            armed.add(CrashPoint.BEFORE_SEND);
+    @Override
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
+            throws ServletException, IOException {
+        String crash = request.getParameter("crash"); // e.g. after-prepare
+        if (crash != null) {
+            arm(CrashPoint.valueOf(crash.toUpperCase().replace('-', '_')));
         }
-        if (beforeCommit) {
-            armed.add(CrashPoint.BEFORE_COMMIT);
+        try {
+            chain.doFilter(request, response);
+        } finally {
+            ARMED.remove();
         }
-        if (afterPrepare) {
-            armed.add(CrashPoint.AFTER_PREPARE);
-        }
-        armed.forEach(point -> LOGGER.warn("💣 armed: CRASH_{} - the next order kills the JVM: {}", point, point.description));
     }
 
     public void beforeSend() {
@@ -72,24 +85,28 @@ public class CrashSwitch {
         crashIfArmed(CrashPoint.AFTER_PREPARE);
     }
 
-    long whilePlacingAnOrder(LongSupplier placeOrder) {
-        PLACING_AN_ORDER.set(true);
+    /** For tests: place an order that crashes at this point. */
+    long placeOrderAndCrash(CrashPoint point, LongSupplier placeOrder) {
+        arm(point);
         try {
             return placeOrder.getAsLong();
         } finally {
-            PLACING_AN_ORDER.remove();
+            ARMED.remove();
         }
     }
 
-    /** For tests: arm only this crash point, and do something other than halting the JVM. */
-    void armForTest(CrashPoint point, Runnable crash) {
-        armed.clear();
-        armed.add(point);
+    /** For tests: do something other than halting the JVM, which would kill the test runner too. */
+    void crashWith(Runnable crash) {
         this.crash = crash;
     }
 
+    private static void arm(CrashPoint point) {
+        LOGGER.warn("💣 this order will crash: {}", point.description);
+        ARMED.set(point);
+    }
+
     private void crashIfArmed(CrashPoint point) {
-        if (armed.contains(point) && PLACING_AN_ORDER.get()) {
+        if (ARMED.get() == point) {
             LOGGER.error("💥 CRASH! {} - halting the JVM now (no shutdown hooks, no cleanup)", point.description);
             System.out.flush();
             crash.run();
