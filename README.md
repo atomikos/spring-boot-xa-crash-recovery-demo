@@ -228,7 +228,9 @@ Docker). The crash switch throws instead of halting there, since a halt would
 kill the test runner too:
 
 - `AtomicOrderServiceTest`: an order is stored and shipped; a crash before
-  or after the send leaves neither an order nor a shipment.
+  or after the send leaves neither an order nor a shipment; a crash after the
+  prepare leaves an in-doubt transaction in `pg_prepared_xacts`, which Atomikos
+  then commits (without a JVM restart, unlike act 3).
 - `NaiveOrderServiceTest`: without a transaction, a crash before the send
   leaves an order that never ships.
 - `LocalTransactionOrderServiceTest`: with `@Transactional` but without

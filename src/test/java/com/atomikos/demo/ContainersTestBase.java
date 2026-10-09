@@ -1,12 +1,14 @@
 package com.atomikos.demo;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.awaitility.Awaitility.await;
 
 import java.time.Duration;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.activemq.ArtemisContainer;
@@ -19,8 +21,14 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
  * <p>
  * The crash switch throws instead of halting the JVM (a halt would kill the
  * test runner too).
+ * <p>
+ * Each test class closes its Spring context when done: otherwise the cached
+ * contexts of the other profiles keep their {@link ShippingListener} running on
+ * the same queue, and could consume this class's messages outside its
+ * transaction setup.
  */
 @Testcontainers(disabledWithoutDocker = true)
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 abstract class ContainersTestBase {
 
     // started once and shared by all test classes (whose Spring contexts are cached),
@@ -69,11 +77,9 @@ abstract class ContainersTestBase {
         crashSwitch.armForTest(point, () -> {
             throw new IllegalStateException("simulated crash");
         });
-        try {
-            crashSwitch.whilePlacingAnOrder(() -> orderService.placeOrder("book"));
-        } catch (IllegalStateException expected) {
-            // the "crash"
-        }
+        // only the simulated crash may stop the order: any other failure fails the test
+        assertThatThrownBy(() -> crashSwitch.whilePlacingAnOrder(() -> orderService.placeOrder("book")))
+                .hasMessage("simulated crash");
     }
 
     void assertNoShipmentWithin3Seconds() {
