@@ -36,7 +36,7 @@ for round in $(seq 1 "$ROUNDS"); do
     echo "=== round $round/$ROUNDS: $mode"
     ./mvnw -q test -Dtest=OrderServiceBenchmark -Dsurefire.failIfNoSpecifiedTests=false \
            -Dbenchmark.mode="$mode" "$@" \
-      | grep -E '^(mode|naive|local-tx|xa |checked)' || { echo "benchmark failed: see target/surefire-reports"; exit 1; }
+      | grep -E '^(mode|Atomikos pools|naive|local-tx|xa |checked)' || { echo "benchmark failed: see target/surefire-reports"; exit 1; }
   done
 done
 

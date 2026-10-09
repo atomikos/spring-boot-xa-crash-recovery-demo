@@ -260,6 +260,8 @@ committed. To see how much that is, compare the three modes:
 ROUNDS=1 ./benchmark.sh   # a quicker look
 ```
 
+On Windows, `benchmark.bat` does the same (`set ROUNDS=1` for a quicker look).
+
 Each mode runs in its own JVM against fresh containers (your demo data is not
 touched) and places orders as fast as it can from 1, 4 and 16 threads.
 Every mode gets the same pool sizes, and the shipping listener is paused, so
@@ -296,7 +298,8 @@ are for code that loses or invents orders when it crashes (acts 1 and 2).
 Options for a single run:
 `./mvnw test -Dtest=OrderServiceBenchmark -Dbenchmark.mode=naive|local-tx|xa`,
 plus `-Dbenchmark.threads=1,4,16`, `-Dbenchmark.warmup=10` and
-`-Dbenchmark.seconds=20` (seconds). `./benchmark.sh` passes any option on to Maven.
+`-Dbenchmark.seconds=20` (seconds). `./benchmark.sh` and `benchmark.bat` pass any option on to Maven (on
+Windows without double quotes, which `mvnw.cmd` rejects).
 
 ## Going to production?
 
