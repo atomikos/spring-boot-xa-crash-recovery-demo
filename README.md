@@ -34,6 +34,11 @@ In a second terminal:
 ./demo.sh status        # orders, shipments and in-doubt transactions, straight from PostgreSQL
 ```
 
+On Windows, use `demo.bat` instead of `demo.sh` (same commands: `.\demo order book`,
+`.\demo crash before-send`, `.\demo status`, `.\demo reset`) and `.\mvnw` instead
+of `./mvnw`. To pick a profile, run `.\mvnw spring-boot:run "-Dspring-boot.run.profiles=naive"`
+instead of putting `SPRING_PROFILES_ACTIVE=...` in front of the command.
+
 Each order is a row in PostgreSQL plus a message on the `orders` queue; the
 `ShippingListener` turns the message into a shipment. Every order should be
 shipped exactly once.
@@ -188,10 +193,6 @@ transactions.
   the phase-2 commit. Demo plumbing only — a real app needs none of it.
   (That hook needs Atomikos, so `crash after-prepare` does not crash under the
   `naive` and `local-tx` profiles.)
-
-On Windows (PowerShell), use `curl.exe -X POST localhost:8080/orders` (add
-`?crash=before-send`, `before-commit` or `after-prepare` to crash) and
-`docker compose exec postgres psql -U shop -d shop` instead of `demo.sh`.
 
 ## How it's wired
 
