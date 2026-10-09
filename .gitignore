@@ -1,0 +1,8 @@
+target/
+transaction-logs/
+.idea/
+*.iml
+.vscode/
+.classpath
+.project
+.settings/
