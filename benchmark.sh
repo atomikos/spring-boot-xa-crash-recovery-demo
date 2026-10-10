@@ -40,20 +40,49 @@ for round in $(seq 1 "$ROUNDS"); do
   done
 done
 
+# the averages per mode and thread count: a text table, or markdown with "averages md"
+averages() {
+  awk -F, -v modes="${MODES[*]}" -v md="${1:-}" '
+    function row(a, b, c, d, e, f) {
+      if (md) printf "| %s | %s | %s | %s | %s | %s |\n", a, b, c, d, e, f
+      else printf "%-9s %7s %10s %8s %8s %9s\n", a, b, c, d, e, f
+    }
+    NR > 1 { key = $2 SUBSEP $3; n[key]++; tps[key] += $7; p50[key] += $8; p99[key] += $10; threads[$3] = 1 }
+    END {
+      split(modes, m, " ")
+      row("mode", "threads", "orders/s", "p50 ms", "p99 ms", "vs naive")
+      if (md) print "|:--|--:|--:|--:|--:|--:|"
+      count = 0
+      for (t in threads) ts[++count] = t + 0
+      for (i = 2; i <= count; i++) for (j = i; j > 1 && ts[j - 1] > ts[j]; j--) { x = ts[j]; ts[j] = ts[j - 1]; ts[j - 1] = x }
+      for (i = 1; i <= count; i++) for (j = 1; j in m; j++) {
+        key = m[j] SUBSEP ts[i]; naive = "naive" SUBSEP ts[i]
+        if (!(key in n)) continue
+        vs = (naive in n) ? sprintf("%+.0f%%", 100 * (tps[key] / n[key]) / (tps[naive] / n[naive]) - 100) : "-"
+        row(m[j], ts[i], sprintf("%.1f", tps[key] / n[key]), sprintf("%.2f", p50[key] / n[key]),
+            sprintf("%.2f", p99[key] / n[key]), vs)
+      }
+    }' "$RESULTS"
+}
+
 echo
 echo "=== average of $ROUNDS round(s), $(uname -sm) - raw numbers in $RESULTS"
-awk -F, -v modes="${MODES[*]}" '
-  NR > 1 { key = $2 SUBSEP $3; n[key]++; tps[key] += $7; p50[key] += $8; p99[key] += $10; threads[$3] = 1 }
-  END {
-    split(modes, m, " ")
-    printf "%-9s %7s %10s %8s %8s %9s\n", "mode", "threads", "orders/s", "p50 ms", "p99 ms", "vs naive"
-    count = 0
-    for (t in threads) ts[++count] = t + 0
-    for (i = 2; i <= count; i++) for (j = i; j > 1 && ts[j - 1] > ts[j]; j--) { x = ts[j]; ts[j] = ts[j - 1]; ts[j - 1] = x }
-    for (i = 1; i <= count; i++) for (j = 1; j in m; j++) {
-      key = m[j] SUBSEP ts[i]; naive = "naive" SUBSEP ts[i]
-      if (!(key in n)) continue
-      vs = (naive in n) ? sprintf("%+.0f%%", 100 * (tps[key] / n[key]) / (tps[naive] / n[naive]) - 100) : "-"
-      printf "%-9s %7d %10.1f %8.2f %8.2f %9s\n", m[j], ts[i], tps[key] / n[key], p50[key] / n[key], p99[key] / n[key], vs
-    }
-  }' "$RESULTS"
+averages
+
+# on GitHub Actions: the same table, as a report on the run's summary page
+if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+  {
+    echo "## What does XA cost?"
+    echo
+    echo "Orders placed per second, average of $ROUNDS round(s) (see [the README](${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-atomikos/spring-boot-xa-crash-recovery-demo}/blob/${GITHUB_SHA:-main}/README.md#what-does-xa-cost))."
+    echo "Every run was checked: one row and one message per order, no in-doubt transactions."
+    echo
+    averages md
+    echo
+    echo "Runner: $(uname -sm), $(nproc) CPUs ($(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2 | xargs)),"
+    echo "Java $(java -version 2>&1 | head -1 | cut -d'"' -f2), Docker $(docker version --format '{{.Server.Version}}')."
+    echo "A shared CI runner is noisy, and the database and broker run on the same machine:"
+    echo "compare the modes with each other, not with runs on other hardware."
+    echo "Raw numbers: the \`benchmark-results\` artifact."
+  } >> "$GITHUB_STEP_SUMMARY"
+fi

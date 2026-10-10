@@ -262,6 +262,9 @@ ROUNDS=1 ./benchmark.sh   # a quicker look
 
 On Windows, `benchmark.bat` does the same (`set ROUNDS=1` for a quicker look).
 
+GitHub Actions runs one round after every build and shows the table on the
+run's summary page (more rounds: run the workflow by hand).
+
 Each mode runs in its own JVM against fresh containers (your demo data is not
 touched) and places orders as fast as it can from 1, 4 and 16 threads.
 Every mode gets the same pool sizes, and the shipping listener is paused, so
