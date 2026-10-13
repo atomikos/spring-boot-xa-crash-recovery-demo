@@ -6,3 +6,4 @@ transaction-logs/
 .classpath
 .project
 .settings/
+.demo-profile
