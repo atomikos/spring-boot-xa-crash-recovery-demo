@@ -31,6 +31,7 @@
   button:hover { background: #e6e6e6; }
   button.order { background: #1f6feb; border-color: #1f6feb; color: #fff; }
   button.crash { background: #fff1f0; border-color: #d1242f; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
   #result { min-height: 1.5em; margin: 1rem 0 2rem; font-weight: 600; }
   #down { display: none; padding: 1rem; border-radius: .4rem; background: #1a1a1a; color: #fff; margin-bottom: 1rem; }
   body.down #down { display: block; }
@@ -49,9 +50,9 @@
 <div class="actions">
   <input id="product" value="book" aria-label="product">
   <button class="order" onclick="order()">Place an order</button>
-  <button class="crash" onclick="order('before-send')">💣 Crash before the send</button>
-  <button class="crash" onclick="order('before-commit')">💣 Crash before the commit</button>
-  <button class="crash" onclick="order('after-prepare')">💣 Crash after prepare</button>
+  <button class="crash" data-crash="before-send" onclick="order('before-send')">💣 Crash before the send</button>
+  <button class="crash" data-crash="before-commit" onclick="order('before-commit')">💣 Crash before the commit</button>
+  <button class="crash" data-crash="after-prepare" onclick="order('after-prepare')">💣 Crash after prepare</button>
 </div>
 <p id="result"></p>
 
@@ -69,6 +70,13 @@
 
 <script>
   const $ = id => document.getElementById(id);
+
+  function crashEnabled(which, on, why) {
+    const b = document.querySelector('.crash[data-crash="' + which + '"]');
+    if (!b) return;
+    b.disabled = !on;
+    b.title = on ? '' : why;
+  }
 
   async function order(crash) {
     const params = new URLSearchParams({ product: $('product').value || 'book' });
@@ -103,6 +111,10 @@
       if (document.body.classList.contains('down')) $('result').textContent = 'the app is back up';
       document.body.classList.remove('down');
       $('mode').textContent = 'Running: ' + status.mode;
+      // Only offer the crash points that exist in this mode:
+      // naive has no transactional commit; only Atomikos has a two-phase prepare.
+      crashEnabled('before-commit', status.transactional, 'no transactional commit in this mode');
+      crashEnabled('after-prepare', status.xa, 'no two-phase commit without Atomikos');
       rows($('orders'), status.orders, o => [o.order, o.product, o.shipment], 'no orders yet');
       rows($('in-doubt'), status.inDoubt, t => [t.gid, new Date(t.prepared).toLocaleTimeString()], 'none');
     } catch (e) {
