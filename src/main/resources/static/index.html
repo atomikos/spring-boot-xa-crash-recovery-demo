@@ -51,7 +51,13 @@
   .muted { color: #888; font-size: .8rem; margin: .25rem 0 0; }
   #arch { margin-top: 2.5rem; }
   #arch h2 { font-size: .95rem; text-transform: uppercase; letter-spacing: .03em; color: #555; margin: 0 0 .5rem; }
-  #arch pre { background: #f6f8fa; color: #1a1a1a; border: 1px solid #d0d7de; padding: 1rem; border-radius: .4rem; overflow: auto; font-size: .9rem; line-height: 1.5; }
+  #arch .flow { display: flex; flex-direction: column; align-items: flex-start; gap: .1rem; font-size: .95rem; }
+  #arch .node { font-weight: 600; }
+  #arch .step { padding: .15rem 0; }
+  #arch .txzone { display: inline-block; }
+  #arch .boxed { border: 2px dashed #1f6feb; border-radius: .5rem; padding: .35rem .6rem; margin: .15rem 0; }
+  #arch .tx-label { color: #1f6feb; font-size: .85rem; margin: .35rem 0 .2rem; min-height: 1.1em; }
+  #arch .arrow { color: #999; }
 </style>
 </head>
 <body>
@@ -81,16 +87,19 @@
 
 <section id="arch">
   <h2>How it works</h2>
-  <pre>placeOrder()                      ← one business operation
-  ├─① save order ─────────► PostgreSQL · order
-  └─② send order id ──────► Artemis · queue "orders"
-                                  │
-                                  ▼
-                           ShippingListener
-                                  │ save
-                                  ▼
-                           PostgreSQL · shipment</pre>
-  <p class="muted">One operation writes to two resources — PostgreSQL (the order) and the Artemis queue. The <code>ShippingListener</code> turns the queued message into the shipment. The 💣 crash points sit between these writes.</p>
+  <div class="flow">
+    <div class="node">placeOrder()</div>
+    <div id="txzone" class="txzone">
+      <div class="step" id="step-db">① save order <span class="arrow">→</span> <strong>PostgreSQL</strong> · order</div>
+      <div class="step" id="step-jms">② send order id <span class="arrow">→</span> <strong>Artemis</strong> · queue "orders"</div>
+    </div>
+    <div id="tx-label" class="tx-label"></div>
+    <div class="arrow">↓&nbsp; the queued message</div>
+    <div class="node">ShippingListener</div>
+    <div class="arrow">↓&nbsp; save</div>
+    <div class="node"><strong>PostgreSQL</strong> · shipment</div>
+  </div>
+  <p class="muted">One operation writes to two resources — PostgreSQL (the order) and the Artemis queue. The dashed box is the transaction boundary for the current mode; the <code>ShippingListener</code> turns the queued message into the shipment.</p>
 </section>
 
 <section id="code">
@@ -144,6 +153,21 @@
     }
   }
 
+  function renderArch(status) {
+    const zone = $('txzone'), db = $('step-db'), label = $('tx-label');
+    zone.classList.remove('boxed');
+    db.classList.remove('boxed');
+    if (status.xa) {
+      zone.classList.add('boxed');
+      label.textContent = 'Dashed box = one XA transaction: the order insert and the message commit together, or neither does.';
+    } else if (status.transactional) {
+      db.classList.add('boxed');
+      label.textContent = 'Dashed box = a local @Transactional database transaction — the JMS send happens outside it.';
+    } else {
+      label.textContent = 'No transaction — the insert and the send each commit on their own.';
+    }
+  }
+
   async function order(crash) {
     const params = new URLSearchParams({ product: $('product').value || 'book' });
     if (crash) params.set('crash', crash);
@@ -182,6 +206,7 @@
       crashEnabled('before-commit', status.transactional, 'no transactional commit in this mode');
       crashEnabled('after-prepare', status.xa, 'no two-phase commit without Atomikos');
       renderCode(status);
+      renderArch(status);
       rows($('orders'), status.orders, o => [o.order, o.product, o.shipment], 'no orders yet');
       rows($('in-doubt'), status.inDoubt, t => [t.gid, new Date(t.prepared).toLocaleTimeString()], 'none');
     } catch (e) {
