@@ -41,6 +41,12 @@
   th { font-size: .85rem; text-transform: uppercase; color: #555; }
   td.empty { color: #888; font-style: italic; }
   #in-doubt td { background: #fff8c5; }
+  #code { margin-top: 2.5rem; }
+  #code h2 { font-size: .95rem; text-transform: uppercase; letter-spacing: .03em; color: #555; margin: 0 0 .5rem; }
+  #code pre { background: #0d1117; color: #e6edf3; padding: 1rem; border-radius: .4rem; overflow: auto; font-size: .95rem; line-height: 1.45; }
+  .hl { color: #ffa657; font-weight: 700; }
+  .note { color: #555; margin: .5rem 0; }
+  .muted { color: #888; font-size: .8rem; margin: .25rem 0 0; }
 </style>
 </head>
 <body>
@@ -68,6 +74,17 @@
   </table>
 </div>
 
+<section id="code">
+  <h2 id="code-title"></h2>
+  <pre><code id="code-java"></code></pre>
+  <p class="muted">The business logic of <code>placeOrder()</code> (<code>com.atomikos.demo</code>). The 💣 buttons crash the app between these two steps — and, with Atomikos, mid-commit.</p>
+  <p id="code-note" class="note"></p>
+  <div id="code-pom-wrap" hidden>
+    <p class="note">The only Atomikos dependency on the classpath — this is what makes <code>@Transactional</code> span the database <em>and</em> the broker:</p>
+    <pre><code id="code-pom"></code></pre>
+  </div>
+</section>
+
 <script>
   const $ = id => document.getElementById(id);
 
@@ -76,6 +93,36 @@
     if (!b) return;
     b.disabled = !on;
     b.title = on ? '' : why;
+  }
+
+  const METHOD_BODY =
+`public long placeOrder(String product) {
+    PurchaseOrder order = orders.save(new PurchaseOrder(product)); // 1. PostgreSQL
+    jms.convertAndSend("orders", order.getId());                   // 2. Artemis
+    return order.getId();
+}`;
+  const POM =
+`<dependency>
+    <groupId>com.atomikos</groupId>
+    <artifactId>transactions-spring-boot4-starter</artifactId>
+</dependency>`;
+
+  function renderCode(status) {
+    // METHOD_BODY has no HTML-special chars, so innerHTML is safe here; the @Transactional
+    // line is highlighted. The pom has angle brackets, so it uses textContent (escaped).
+    $('code-java').innerHTML = (status.transactional ? '<span class="hl">@Transactional</span>\n' : '') + METHOD_BODY;
+    $('code-pom').textContent = POM;
+    $('code-pom-wrap').hidden = !status.xa;
+    if (status.xa) {
+      $('code-title').textContent = 'Code running now — @Transactional, coordinated by Atomikos (XA)';
+      $('code-note').textContent = 'Both or neither: the database insert and the JMS send commit together or roll back together — and an in-doubt transaction is completed automatically on restart.';
+    } else if (status.transactional) {
+      $('code-title').textContent = 'Code running now — @Transactional, but NO Atomikos';
+      $('code-note').textContent = 'The same method as the Atomikos case, but without the starter it is a local database transaction only — the JMS send happens outside it. That is why a crash can ship an order that does not exist.';
+    } else {
+      $('code-title').textContent = 'Code running now — no transaction';
+      $('code-note').textContent = 'The insert and the send each commit on their own; a crash between them loses the message for good.';
+    }
   }
 
   async function order(crash) {
@@ -115,6 +162,7 @@
       // naive has no transactional commit; only Atomikos has a two-phase prepare.
       crashEnabled('before-commit', status.transactional, 'no transactional commit in this mode');
       crashEnabled('after-prepare', status.xa, 'no two-phase commit without Atomikos');
+      renderCode(status);
       rows($('orders'), status.orders, o => [o.order, o.product, o.shipment], 'no orders yet');
       rows($('in-doubt'), status.inDoubt, t => [t.gid, new Date(t.prepared).toLocaleTimeString()], 'none');
     } catch (e) {
