@@ -49,6 +49,9 @@
   .hl { color: #ffa657; font-weight: 700; }
   .note { color: #555; margin: .5rem 0; }
   .muted { color: #888; font-size: .8rem; margin: .25rem 0 0; }
+  #arch { margin-top: 2.5rem; }
+  #arch h2 { font-size: .95rem; text-transform: uppercase; letter-spacing: .03em; color: #555; margin: 0 0 .5rem; }
+  #arch pre { background: #f6f8fa; color: #1a1a1a; border: 1px solid #d0d7de; padding: 1rem; border-radius: .4rem; overflow: auto; font-size: .9rem; line-height: 1.5; }
 </style>
 </head>
 <body>
@@ -75,6 +78,20 @@
     <tbody id="in-doubt"></tbody>
   </table>
 </div>
+
+<section id="arch">
+  <h2>How it works</h2>
+  <pre>placeOrder()                      ← one business operation
+  ├─① save order ─────────► PostgreSQL · order
+  └─② send order id ──────► Artemis · queue "orders"
+                                  │
+                                  ▼
+                           ShippingListener
+                                  │ save
+                                  ▼
+                           PostgreSQL · shipment</pre>
+  <p class="muted">One operation writes to two resources — PostgreSQL (the order) and the Artemis queue. The <code>ShippingListener</code> turns the queued message into the shipment. The 💣 crash points sit between these writes.</p>
+</section>
 
 <section id="code">
   <h2 id="code-title"></h2>
