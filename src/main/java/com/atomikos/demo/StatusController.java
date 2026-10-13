@@ -45,19 +45,27 @@ public class StatusController {
 
     private final JdbcTemplate jdbc;
     private final String mode;
+    private final boolean transactional; // naive has no transactional commit
+    private final boolean xa;            // two-phase prepare exists only with Atomikos
 
     public StatusController(JdbcTemplate jdbc, Environment environment) {
         this.jdbc = jdbc;
         List<String> profiles = Arrays.asList(environment.getActiveProfiles());
-        this.mode = profiles.contains("naive") ? "no XA: the classic dual write"
-                : profiles.contains("local-tx") ? "@Transactional without XA (database only)"
+        boolean naive = profiles.contains("naive");
+        boolean localTx = profiles.contains("local-tx");
+        this.mode = naive ? "no XA: the classic dual write"
+                : localTx ? "@Transactional without XA (database only)"
                 : "Atomikos: one XA transaction";
+        this.transactional = !naive;   // local-tx and Atomikos both commit transactionally
+        this.xa = !naive && !localTx;  // only Atomikos coordinates a two-phase commit
     }
 
     @GetMapping("/status")
     @Transactional(readOnly = true)
     public Map<String, Object> status() {
         return Map.of("mode", mode,
+                      "transactional", transactional,
+                      "xa", xa,
                       "orders", jdbc.queryForList(ORDERS),
                       "inDoubt", jdbc.queryForList(IN_DOUBT));
     }
