@@ -71,8 +71,9 @@ browser) so the text reads on a small screen. Do a dry run of every act before r
 - The crashed order is nowhere: no order, no shipment. The message was part of
   the transaction, so it rolled back with the insert. Both or neither.
 - Optional contrast ("why not just `@Transactional`?"): the same with the
-  `local-tx` profile gives **👻 shipped, but the order does not exist**: the
-  database rolled back, but the message was already out.
+  `local-tx` profile gives **✅ shipped but ❌ no order** (a shipment for an
+  order that does not exist): the database rolled back, but the message was
+  already out.
 
 ### Act 3: crash in the middle of the commit
 

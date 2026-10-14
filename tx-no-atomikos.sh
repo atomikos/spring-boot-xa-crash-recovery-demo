@@ -13,7 +13,7 @@ echo
 echo "────────────────────────────────────────────────────────────"
 echo "  Open:          http://localhost:8080"
 echo "  Try pressing:  💣 Crash before the commit"
-echo "  Then:          ./restart.sh   → 👻 shipped, but the order does not exist"
+echo "  Then:          ./restart.sh   → ✅ shipped, but ❌ no order (shipped an order that does not exist)"
 echo "────────────────────────────────────────────────────────────"
 echo
 SPRING_PROFILES_ACTIVE=local-tx ./mvnw spring-boot:run

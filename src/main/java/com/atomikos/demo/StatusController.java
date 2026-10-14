@@ -37,9 +37,7 @@ public class StatusController {
     private static final String ORDERS = """
             SELECT coalesce(o.id, s.order_id) AS "order",
                    CASE WHEN o.id IS NULL THEN '❌ no order' ELSE '✅ ' || o.product END AS product,
-                   CASE WHEN s.order_id IS NULL THEN '❌ not shipped'
-                        WHEN o.id IS NULL THEN '👻 shipped'
-                        ELSE '✅ shipped' END AS shipment
+                   CASE WHEN s.order_id IS NULL THEN '❌ not shipped' ELSE '✅ shipped' END AS shipment
             FROM purchase_order o FULL JOIN shipment s ON s.order_id = o.id ORDER BY 1""";
 
     private static final String IN_DOUBT = "SELECT gid, prepared FROM pg_prepared_xacts";
