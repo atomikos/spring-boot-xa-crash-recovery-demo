@@ -125,9 +125,9 @@ SPRING_PROFILES_ACTIVE=local-tx ./mvnw spring-boot:run      # restart
 ```
 
 ```
- order | product |                 shipment
--------+---------+------------------------------------------
-     1 |         | 👻 shipped, but the order does not exist
+ order |   product   |  shipment
+-------+-------------+------------
+     1 | ❌ no order | ✅ shipped
 ```
 
 The crash rolled back the order, but the message was already out. On restart
