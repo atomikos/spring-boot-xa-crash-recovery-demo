@@ -265,8 +265,8 @@ kill the test runner too:
 
 The crash recovery you saw is in the open-source edition. Running it in
 Kubernetes, where a crashed pod may come back with a different name and
-without its local disk, is where the commercial editions come in: cloud-native
-transaction logging (LogCloud), high availability, and high performance. Try them
+without its local disk, is where the commercial edition comes in: cloud-native
+transaction logging (LogCloud), high availability, and high performance. Try it
 free at [atomikos.com/golive](https://www.atomikos.com/golive).
 
 ## Reset
