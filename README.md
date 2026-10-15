@@ -2,13 +2,14 @@
 
 A Spring Boot 4 app that saves an order in **PostgreSQL** and sends an order
 message to **ActiveMQ Artemis**. We kill the JVM at the worst possible moment,
-three times:
+four times:
 
 | Act | Setup | Crash | After the crash | After a restart |
 |-----|-------|-------|-----------------|-----------------|
 | 1 | no XA (classic dual write) | between the insert and the send | order saved, message lost | **still broken, forever** |
-| 2 | Atomikos + one `@Transactional` | after the send, before the commit | nothing happened | consistent |
-| 3 | Atomikos + one `@Transactional` | in the middle of the commit, after both resources *prepared* | in-doubt: visible in `pg_prepared_xacts` | **Atomikos recovery completes it** — consistent |
+| 2 | one `@Transactional`, no Atomikos | after the send, before the commit | order rolled back, message already sent | **a shipment for an order nobody placed** |
+| 3 | Atomikos + one `@Transactional` | after the send, before the commit | nothing happened | consistent |
+| 4 | Atomikos + one `@Transactional` | in the middle of the commit, after both resources *prepared* | in-doubt: visible in `pg_prepared_xacts` | **Atomikos recovery completes it** — consistent |
 
 The crashes are not a random `kill -9` (which almost always misses the window):
 a crash switch halts the JVM at the exact point, every time:
@@ -34,6 +35,17 @@ In a second terminal:
 ./demo.sh status        # orders, shipments and in-doubt transactions, straight from PostgreSQL
 ```
 
+On macOS/Linux, three one-command shortcuts reset, pick the right profile and
+start the app — one per setup — and `./restart.sh` brings the same profile back
+up *without* a reset, so you can watch what survived a crash:
+
+| Script | Act |
+|--------|-----|
+| `./naive.sh` | act 1 — no XA (the dual write) |
+| `./tx-no-atomikos.sh` | act 2 — `@Transactional` without Atomikos |
+| `./tx-with-atomikos.sh` | acts 3 & 4 — Atomikos, one XA transaction |
+| `./restart.sh` | restart the last profile, no reset |
+
 On Windows, use `demo.bat` instead of `demo.sh` (same commands: `.\demo order book`,
 `.\demo crash before-send`, `.\demo status`, `.\demo reset`) and `.\mvnw` instead
 of `./mvnw`. To pick a profile, run `.\mvnw spring-boot:run "-Dspring-boot.run.profiles=naive"`
@@ -43,7 +55,7 @@ Or open **http://localhost:8080/** (handy for a live talk): buttons to place an
 order or crash it at each point, and the same tables as `status`, refreshed
 every second. When the app is down the page says so, and it picks up again as
 soon as you restart it, so you can watch recovery happen. The one thing it
-can't show is an in-doubt transaction while the app is down (act 3): the page
+can't show is an in-doubt transaction while the app is down (act 4): the page
 reads through the app, so use `./demo.sh status` for that moment.
 
 Each order is a row in PostgreSQL plus a message on the `orders` queue; the
@@ -53,8 +65,7 @@ shipped exactly once.
 ## Act 1: the dual write (no XA)
 
 ```bash
-./demo.sh reset                              # fresh database, fresh broker
-SPRING_PROFILES_ACTIVE=naive ./mvnw spring-boot:run
+./naive.sh                                   # reset, then start the naive (no-XA) profile
 ./demo.sh crash before-send
 ```
 
@@ -72,7 +83,7 @@ SPRING_PROFILES_ACTIVE=naive ./mvnw spring-boot:run
      1 | book    | ❌ NOT shipped
 ```
 
-Restart (`SPRING_PROFILES_ACTIVE=naive ./mvnw spring-boot:run`) and check again:
+Restart (`./restart.sh`) and check again:
 order 1 is **still** not shipped. Nothing knows the message was ever meant to
 be sent. That's a permanent half-state — a customer who paid and never gets
 their book.
@@ -81,10 +92,11 @@ The `naive` profile runs [`NaiveOrderService`](src/main/java/com/atomikos/demo/N
 with Atomikos switched off: the insert commits on its own, the send happens on
 its own.
 
-## Act 2: one `@Transactional`
+## Act 2: just add `@Transactional`?
 
-[`TransactionalOrderService`](src/main/java/com/atomikos/demo/TransactionalOrderService.java) is
-the exact same code plus `@Transactional`:
+The obvious fix is to wrap the two writes in a transaction.
+[`TransactionalOrderService`](src/main/java/com/atomikos/demo/TransactionalOrderService.java)
+is the exact same code plus `@Transactional`:
 
 ```java
 @Transactional
@@ -97,30 +109,16 @@ public long placeOrder(String product) {
 }
 ```
 
-With `transactions-spring-boot4-starter` on the classpath, that's one XA
-transaction across both. This time we crash *after* the send:
+But without a transaction manager that spans both resources, `@Transactional` is
+just a *local* database transaction — the JMS send still happens on its own. The
+`local-tx` profile is exactly that: the same service with Atomikos switched off,
+so Spring falls back to its plain `JpaTransactionManager`. Crash after the send,
+before the commit:
 
 ```bash
-./demo.sh reset
-./mvnw spring-boot:run
+./tx-no-atomikos.sh                          # reset, then start the local-tx (no-Atomikos) profile
 ./demo.sh crash before-commit
-./demo.sh status                             # no order, no shipment
-```
-
-Restart (`./mvnw spring-boot:run`): still no order and no shipment. The message
-was part of the transaction, so the crash rolled it back together with the
-insert. Either both happen or neither does.
-
-### "Why not just `@Transactional`?"
-
-Without Atomikos, `@Transactional` is a local database transaction, and the
-JMS send happens on its own. Try it with the `local-tx` profile:
-
-```bash
-./demo.sh reset
-SPRING_PROFILES_ACTIVE=local-tx ./mvnw spring-boot:run
-./demo.sh crash before-commit
-SPRING_PROFILES_ACTIVE=local-tx ./mvnw spring-boot:run      # restart
+./restart.sh                                 # restart, same profile, no reset
 ./demo.sh status
 ```
 
@@ -130,11 +128,29 @@ SPRING_PROFILES_ACTIVE=local-tx ./mvnw spring-boot:run      # restart
      1 | ❌ no order | ✅ shipped
 ```
 
-The crash rolled back the order, but the message was already out. On restart
-the listener ships it: a book goes out for an order nobody has. (A crash
-*before* the send is harmless here: it's the other half-state that bites.)
+The crash rolled back the order, but the message was already out. On restart the
+listener ships it: a book goes out for an order nobody has — a different
+permanent half-state, and an even nastier one. (A crash *before* the send is
+harmless here: it's this half-state that bites.)
 
-## Act 3: crash in the middle of the commit
+## Act 3: one `@Transactional` + Atomikos
+
+The exact same service and the exact same annotation — but with
+`transactions-spring-boot4-starter` on the classpath, Atomikos turns that one
+`@Transactional` into a single XA transaction across PostgreSQL *and* Artemis.
+We crash at the same point, *after* the send:
+
+```bash
+./tx-with-atomikos.sh                        # reset, then start with Atomikos (XA)
+./demo.sh crash before-commit
+./demo.sh status                             # no order, no shipment
+```
+
+Restart (`./restart.sh`): still no order and no shipment. The message was part
+of the transaction, so the crash rolled it back together with the insert. Either
+both happen or neither does — no half-state, nothing to clean up.
+
+## Act 4: crash in the middle of the commit
 
 The scary one. Two-phase commit: first both resources *prepare* (promise they
 can commit), then Atomikos logs its decision and tells each to *commit*. We halt
@@ -142,8 +158,7 @@ the JVM after the prepares and after the decision — but before PostgreSQL got
 its commit.
 
 ```bash
-./demo.sh reset
-./mvnw spring-boot:run
+./tx-with-atomikos.sh                        # reset, then start with Atomikos (XA)
 ./demo.sh crash after-prepare
 ```
 
@@ -169,7 +184,7 @@ The order is invisible, the message is invisible — but both are *prepared*,
 holding locks, waiting for someone to decide. That someone is Atomikos. Restart:
 
 ```bash
-./mvnw spring-boot:run
+./restart.sh
 ```
 
 ```
@@ -190,7 +205,7 @@ transactions.
 - **Wonder why recovery doesn't crash too?** The crash switch arms only the
   one request that asked for it (`?crash=after-prepare`), not the phase-2
   commit that Atomikos recovery replays after the restart.
-- **Delete `transaction-logs/` before restarting in act 3.** Now nobody
+- **Delete `transaction-logs/` before restarting in act 4.** Now nobody
   knows the decision was "commit": the order is never completed, and the
   prepared transaction sits in `pg_prepared_xacts`, holding its locks. The
   transaction log is what makes recovery possible — keep it on durable storage.
@@ -241,7 +256,7 @@ kill the test runner too:
 - `AtomicOrderServiceTest`: an order is stored and shipped; a crash before
   or after the send leaves neither an order nor a shipment; a crash after the
   prepare leaves an in-doubt transaction in `pg_prepared_xacts`, which Atomikos
-  then commits (without a JVM restart, unlike act 3).
+  then commits (without a JVM restart, unlike act 4).
 - `NaiveOrderServiceTest`: without a transaction, a crash before the send
   leaves an order that never ships.
 - `LocalTransactionOrderServiceTest`: with `@Transactional` but without
