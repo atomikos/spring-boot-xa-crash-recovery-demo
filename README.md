@@ -17,6 +17,8 @@ a crash switch halts the JVM at the exact point, every time:
 
 Everything here is the free, open-source **Atomikos TransactionsEssentials**.
 
+Created by [Pascal Leclercq](https://github.com/pascalleclercq) — thanks, Pascal.
+
 
 ## Run it
 
