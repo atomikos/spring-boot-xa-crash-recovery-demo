@@ -1,5 +1,7 @@
 # Crash a Spring Boot app mid-transaction — and watch Atomikos recover
 
+**▶️ [Watch the demo on YouTube](https://www.youtube.com/watch?v=73v1yj1Gp4s)**
+
 A Spring Boot 4 app that saves an order in **PostgreSQL** and sends an order
 message to **ActiveMQ Artemis**. We kill the JVM at the worst possible moment,
 four times:
