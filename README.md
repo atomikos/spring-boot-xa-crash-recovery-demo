@@ -66,31 +66,26 @@ shipped exactly once.
 
 ```bash
 ./naive.sh                                   # reset, then start the naive (no-XA) profile
-./demo.sh crash before-send
 ```
 
-```
-💥 CRASH! after orders.save(..), before the JMS send - halting the JVM now (no shutdown hooks, no cleanup)
-```
-
-```bash
-./demo.sh status
-```
+Open **http://localhost:8080/** and click **💣 Crash before the send**. The app
+halts and the page switches to *"💀 The app is down."* Restart it with
+`./restart.sh`; the page picks itself back up and still shows:
 
 ```
- order | product |    shipment
+ Order | Product | Shipment
 -------+---------+----------------
-     1 | book    | ❌ NOT shipped
+     1 | book    | ❌ not shipped
 ```
 
-Restart (`./restart.sh`) and check again:
-order 1 is **still** not shipped. Nothing knows the message was ever meant to
-be sent. That's a permanent half-state — a customer who paid and never gets
-their book.
+Order 1 is **still** not shipped, and nothing will ever fix it — nothing knows the
+message was meant to be sent. A permanent half-state: a customer who paid and
+never gets their book.
 
 The `naive` profile runs [`NaiveOrderService`](src/main/java/com/atomikos/demo/NaiveOrderService.java)
-with Atomikos switched off: the insert commits on its own, the send happens on
-its own.
+with Atomikos switched off: the insert commits on its own, the send happens on its
+own. (Prefer the terminal? `./demo.sh crash before-send` and `./demo.sh status` do
+the same.)
 
 ## Act 2: just add `@Transactional`?
 
@@ -102,9 +97,9 @@ is the exact same code plus `@Transactional`:
 @Transactional
 public long placeOrder(String product) {
     PurchaseOrder order = orders.save(new PurchaseOrder(product)); // 1. PostgreSQL
-    crashSwitch.beforeSend();                                      //    ./demo.sh crash before-send
+    crashSwitch.beforeSend();                                      //    💣 Crash before the send
     jms.convertAndSend("orders", order.getId());                   // 2. Artemis
-    crashSwitch.beforeCommit();                                    //    ./demo.sh crash before-commit
+    crashSwitch.beforeCommit();                                    //    💣 Crash before the commit
     return order.getId();
 }
 ```
@@ -112,19 +107,18 @@ public long placeOrder(String product) {
 But without a transaction manager that spans both resources, `@Transactional` is
 just a *local* database transaction — the JMS send still happens on its own. The
 `local-tx` profile is exactly that: the same service with Atomikos switched off,
-so Spring falls back to its plain `JpaTransactionManager`. Crash after the send,
-before the commit:
+so Spring falls back to its plain `JpaTransactionManager`.
 
 ```bash
 ./tx-no-atomikos.sh                          # reset, then start the local-tx (no-Atomikos) profile
-./demo.sh crash before-commit
-./restart.sh                                 # restart, same profile, no reset
-./demo.sh status
 ```
 
+On the page, click **💣 Crash before the commit**, then restart with
+`./restart.sh`. When it comes back:
+
 ```
- order |   product   |  shipment
--------+-------------+------------
+ Order | Product    | Shipment
+-------+------------+------------
      1 | ❌ no order | ✅ shipped
 ```
 
@@ -138,17 +132,16 @@ harmless here: it's this half-state that bites.)
 The exact same service and the exact same annotation — but with
 `transactions-spring-boot4-starter` on the classpath, Atomikos turns that one
 `@Transactional` into a single XA transaction across PostgreSQL *and* Artemis.
-We crash at the same point, *after* the send:
 
 ```bash
 ./tx-with-atomikos.sh                        # reset, then start with Atomikos (XA)
-./demo.sh crash before-commit
-./demo.sh status                             # no order, no shipment
 ```
 
-Restart (`./restart.sh`): still no order and no shipment. The message was part
-of the transaction, so the crash rolled it back together with the insert. Either
-both happen or neither does — no half-state, nothing to clean up.
+On the page, click **💣 Crash before the commit** (the crash is *after* the send
+this time), then restart with `./restart.sh`. Now there is **no order and no
+shipment**: the message was part of the transaction, so the crash rolled it back
+together with the insert. Either both happen or neither does — no half-state,
+nothing to clean up.
 
 ## Act 4: crash in the middle of the commit
 
@@ -159,12 +152,12 @@ its commit.
 
 ```bash
 ./tx-with-atomikos.sh                        # reset, then start with Atomikos (XA)
-./demo.sh crash after-prepare
 ```
 
-```
-💥 CRASH! PostgreSQL and Artemis both PREPARED, commit decision logged, PostgreSQL NOT committed yet - halting the JVM now (no shutdown hooks, no cleanup)
-```
+On the page, click **💣 Crash after prepare**. The app halts with both resources
+prepared and the commit decision logged. This is the one moment the page can't
+show — it reads *through* the app, which is down — so look straight at the
+database:
 
 ```bash
 ./demo.sh status
@@ -194,8 +187,8 @@ Started Application in 12.62 seconds
 
 Atomikos read its transaction log (`transaction-logs/`), found the
 `COMMITTING` decision, and finished the job on both resources — no application
-code involved. `./demo.sh status` now shows order 1 shipped and no in-doubt
-transactions.
+code involved. A few seconds after the restart the page shows order 1 **✅
+shipped** and no in-doubt transactions left.
 
 ## Break it yourself
 
